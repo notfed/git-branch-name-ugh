@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE
 #include <errno.h>
 #include <libgen.h>
 #include <stdio.h>
@@ -10,30 +11,39 @@
 
 int get_git_dir(char*);
 char* get_rel_git_dir(char*);
-char* read_file(char*);
+char* read_file(char*,char*,int);
 char* git_branch(char*);
+
+char head_path_buffer[4096];
+char head_contents_buffer[4096];
+char rel_git_dir_buffer[4096];
 
 int main(int argc, char const* argv[])
 {
-  char buffer[1024];
-  char* path = buffer, *p;
-  if (getcwd(path, sizeof(buffer)) == NULL) {
-    fprintf(stderr, CMD_NAME ": failed to get current directory\n");
+  char* path = head_path_buffer, *p;
+  // Get path to  `.`
+  if (getcwd(head_path_buffer, sizeof(head_path_buffer)) == NULL) {
+        perror(CMD_NAME ": getcwd failed");
     return 1;
   }
-  if (get_git_dir(path) < 0) {
-    return 0;
+  // Get path to `.git`
+  if (get_git_dir(head_path_buffer) < 0) {
+    return 1;
   }
+  // Get path to `.git/HEAD`
   p = path; while (*++p) {};
   *p++ = '/'; *p++ = 'H'; *p++ = 'E'; *p++ = 'A'; *p++ = 'D'; *p++ = '\0';
-  printf("%s", git_branch(read_file(path)));
+  // Read branch from HEAD file
+  printf("%s", git_branch(read_file(path, head_contents_buffer, sizeof(head_contents_buffer))));
   return 0;
 }
 
 int get_git_dir(char* path)
 {
   struct stat fs;
+  // p = Point to end of path
   char* p = path; while (*++p) {};
+  // Check if {path}.git exists; else nav up and repeat
   while (path < p) {
     *p++ = '/'; *p++ = '.'; *p++ = 'g'; *p++ = 'i'; *p++ = 't'; *p++ = '\0';
     if (stat(path, &fs) < 0) {
@@ -46,8 +56,10 @@ int get_git_dir(char* path)
     }
     switch (fs.st_mode & S_IFMT) {
       case S_IFDIR:
+        // If .git is a dir, we found our git dir
         return 0;
       case S_IFREG: {
+        // If .git is a file, we're in a submodule
         char* cnt = get_rel_git_dir(path);
         if (cnt == NULL) {
           return -1;
@@ -70,7 +82,7 @@ NEXT:
 
 char* get_rel_git_dir(char* path)
 {
-  char* cnt = read_file(path);
+  char* cnt = read_file(path, rel_git_dir_buffer, sizeof(rel_git_dir_buffer));
   if (cnt == NULL) {
     fprintf(stderr, CMD_NAME ": failed to read file: %s", path);
     return NULL;
@@ -83,12 +95,12 @@ char* get_rel_git_dir(char* path)
   return cnt;
 }
 
-char* read_file(char* file)
+char* read_file(char* file, char *buffer, int buffer_size)
 {
-  FILE* fp;
-  char buffer[1024];
-  fp = fopen(file, "r");
-  return fgets(buffer, sizeof(buffer), (FILE*)fp);
+  FILE* fp = fopen(file, "r");
+  char* r = fgets(buffer, buffer_size, (FILE*)fp);
+  fclose(fp);
+  return r;
 }
 
 char* git_branch(char* str)
